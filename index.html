@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+    <title>Babylon.js sample code</title>
+    <!-- Babylon.js -->
+    <script src="./babylon.js"></script>
+    <script src="babylon.objFileLoader.js"></script>
+    <script src="./utility.js"></script>
+    <style>
+        html,
+        body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <script>
+        if (BABYLON.Engine.isSupported()) {
+            var meshes = [];
+            var canvas = document.getElementById("renderCanvas");
+            var engine;
+
+            var renderingEngine = "webgl-1";
+            function LoadShaders() {
+                getGLSL('customVertexShader.txt').then(result => {
+                    BABYLON.ShaderStore.ShadersStore["customVertexShader"] = result;
+
+                    getGLSL('customFragmentShader.txt').then(result => {
+                        BABYLON.ShaderStore.ShadersStore["customFragmentShader"] = result;
+
+                        createScene().then(scene => {
+                            AfterSceneCreated(scene);
+                        });
+                    });
+                });
+            }
+            var selectedMesh;
+            var blueMat;
+            var scene;
+
+            async function createEngine(canvas) {
+                webGPUSupported = await BABYLON.WebGPUEngine.IsSupportedAsync;
+                if (webGPUSupported && renderingEngine === "webgpu") {
+                    const engine = new BABYLON.WebGPUEngine(canvas);
+                    await engine.initAsync();
+                    //engine.dbgShowShaderCode = true
+                    return engine;
+                }
+                return new BABYLON.Engine(canvas, true, {
+                    disableWebGL2Support: renderingEngine === "webgl-1",
+                });
+            }
+
+            var createScene = async function () {
+                engine = await createEngine(canvas);
+                var webgpu = renderingEngine === "webgpu";
+                scene = new BABYLON.Scene(engine);
+                var camera = new BABYLON.ArcRotateCamera("Camera", 0, Math.PI / 2, 12, BABYLON.Vector3.Zero(), scene);
+
+                camera.attachControl(canvas, false);
+                camera.lowerRadiusLimit = 1;
+                camera.minZ = 1.0;
+
+                var light = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(-1, 1, 0), scene);
+                light.diffuse = new BABYLON.Color3(1, 1, 1);
+                light.specular = new BABYLON.Color3(1, 1, 1);
+                light.groundColor = new BABYLON.Color3(0, 1, 0);
+
+
+                // Compile      
+                var shaderMaterial = new BABYLON.ShaderMaterial("shader", scene, {
+                    vertex: "custom",
+                    fragment: "custom",
+                },
+                    {
+                        attributes: ["position", "normal", "uv"],
+                        uniforms: ["world", "worldView", "worldViewProjection", "view", "projection"],
+                        uniformBuffers: webgpu ? ["Scene", "Mesh"] : undefined,
+                        shaderLanguage: webgpu ? BABYLON.ShaderLanguage.WGSL : BABYLON.ShaderLanguage.GLSL
+                    });
+
+                var refTexture = new BABYLON.Texture("ref.jpg", scene);
+
+                refTexture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+                refTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+
+                var mainTexture = new BABYLON.Texture("amiga.jpg", scene);
+                shaderMaterial.setTexture("refSampler", refTexture);
+                shaderMaterial.setTexture("textureSampler", mainTexture);
+                if (webgpu) {
+                    shaderMaterial.setTexture("diffuse", mainTexture);
+                    const sampler = new BABYLON.TextureSampler();
+                    sampler.setParameters(); // use the default values
+                    sampler.samplingMode = BABYLON.Constants.TEXTURE_NEAREST_SAMPLINGMODE;
+                    shaderMaterial.setTextureSampler("mySampler", refTexture);
+                }
+                shaderMaterial.setFloat("time", 0);
+                shaderMaterial.setVector3("cameraPosition", BABYLON.Vector3.Zero());
+                shaderMaterial.backFaceCulling = false;
+                shaderMaterial.depthFunction = BABYLON.Engine.ALWAYS;
+
+                var redMat = new BABYLON.StandardMaterial("redMat", scene);
+                redMat.diffuseColor = new BABYLON.Color3(0, 1, 1);
+
+                var greenMat = new BABYLON.StandardMaterial("greenMat", scene);
+                greenMat.diffuseColor = new BABYLON.Color3(0, 1, 0);
+
+                blueMat = new BABYLON.StandardMaterial("blueMat", scene);
+                blueMat.diffuseColor = new BABYLON.Color3(0, 0, 1);
+
+                var pMat = new BABYLON.StandardMaterial("pMat", scene);
+                pMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
+
+                function selectMesh(index) {
+                    switch (index) {
+                        case 0:
+                            // Creating sphere
+                            let sphere = BABYLON.MeshBuilder.CreateSphere("sphere", { diameter: 2, segments: 32 }, scene);
+                            sphere.position = new BABYLON.Vector3(0, 1, -1);
+                            sphere.material = pMat;
+                            meshes.push(sphere);
+                            break;
+                        case 1:
+                            // Creating Torus
+                            let torus = BABYLON.MeshBuilder.CreateTorus('torus', { diameter: 2 }, scene);
+                            torus.position = new BABYLON.Vector3(0, 1.25, 0);
+                            torus.material = greenMat;
+                            meshes.push(torus);
+                            break;
+                        case 2:
+                            // Creating Torus knot
+                            let torusknot = BABYLON.MeshBuilder.CreateTorusKnot('torusknot', { radius: 1 }, scene);
+                            torusknot.position = new BABYLON.Vector3(1, 1, 0);
+                            torusknot.material = blueMat;
+                            meshes.push(torusknot);
+                            break;
+                        case 3:
+                            meshes.push(BABYLON.MeshBuilder.CreateGroundFromHeightMap("mesh", "heightMap.png", 8, 8, 100, 0, 3));
+                            break;
+                        case 4:
+                            let box = BABYLON.MeshBuilder.CreateBox('box1', { size: 2 }, scene);
+                            box.position = new BABYLON.Vector3(1, 0, 0);
+                            box.material = redMat;
+                            meshes.push(box);
+                            break;
+                        default:
+                            meshes.push(BABYLON.MeshBuilder.CreateTorusKnot('torusknot', { radius: 1 }, scene));
+                            break;
+                    }
+                };
+
+                selectMesh(0);
+                selectMesh(1);
+                selectMesh(2);
+                selectMesh(4);
+                //selectMesh(2);
+                //selectMesh(3);
+
+                const result = await BABYLON.SceneLoader.ImportMeshAsync(null, "./", "rod_assembly.obj", scene);
+
+                result.meshes.forEach(element => {
+                    element.material = blueMat;
+                });
+
+
+
+                return scene;
+            }
+        }
+
+        // handle mouse move  
+        function mousemovef() {
+                var pickResult = scene.pick(scene.pointerX, scene.pointerY);
+
+                if (pickResult.hit) {
+                    selectedMesh = pickResult.pickedMesh;
+                }
+                else {
+                    selectedMesh = null;
+                }
+            }
+
+            // After scene created 
+        function AfterSceneCreated(scene) {
+ 
+            var time = 0;
+            scene.onPointerMove = function () {
+                mousemovef();
+            };
+
+            engine.runRenderLoop(function () {
+                var shaderMaterial = scene.getMaterialByName("shader");
+                shaderMaterial.setFloat("time", time);
+                time += 0.02;
+                console.log('runRenderLoop');
+                shaderMaterial.setVector3("cameraPosition", scene.activeCamera.position);
+                let meshes = scene.meshes;
+                for (var index = 0; index < meshes.length; index++) {
+                    var mesh = meshes[index];
+                    if (selectedMesh === mesh) {
+                        mesh.material = shaderMaterial;
+                        mesh.renderingGroupId = 2;
+                    }
+                    else
+                        mesh.material = blueMat;
+                        mesh.renderingGroupId = 1;
+                }
+                scene.render();
+            });
+
+            window.addEventListener("resize", function () {
+                engine.resize();
+            });
+
+        }
+
+        //load shaders
+        LoadShaders();
+    </script>
+</body>
+
+</html>
